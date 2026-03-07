@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -11,7 +12,12 @@ from app.schemas import OcrExtraction
 
 
 class OcrClient:
-    async def extract(self, image_bytes: bytes, filename: str) -> OcrExtraction:
+    async def extract(
+        self,
+        image_bytes: bytes,
+        filename: str,
+        context: dict[str, Any] | None = None,
+    ) -> OcrExtraction:
         raise NotImplementedError
 
 
@@ -22,12 +28,17 @@ class OpenRouterOcrClient(OcrClient):
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
-    async def extract(self, image_bytes: bytes, filename: str) -> OcrExtraction:
+    async def extract(
+        self,
+        image_bytes: bytes,
+        filename: str,
+        context: dict[str, Any] | None = None,
+    ) -> OcrExtraction:
         if not self.api_key:
             raise RuntimeError("OPENROUTER_API_KEY is missing")
 
         data_uri = self._to_data_uri(image_bytes, filename)
-        prompt = self._prompt()
+        prompt = self._prompt(context)
 
         payload: dict[str, Any] = {
             "model": self.model,
@@ -114,12 +125,46 @@ class OpenRouterOcrClient(OcrClient):
             raise RuntimeError("Invalid OCR response type")
         return parsed
 
-    def _prompt(self) -> str:
-        return (
+    def _prompt(self, context: dict[str, Any] | None) -> str:
+        prompt = (
             "Определи показание счетчика на фото и тип счетчика. "
             "Возвращай только JSON по схеме. "
             "Подсказки по типам: "
             "СВУ-15И = hot_water, СВХ-15И = cold_water, Меркурий 202.1 = electricity. "
+            "Для water-счетчиков красные цифры после черных обычно дробная часть м3. "
+            "Не присоединяй красные дробные цифры к целой части. "
+            "Если распознавание похоже на ошибку масштаба (x10/x100/x1000), "
+            "используй исторический контекст и верни наиболее правдоподобное значение. "
+            "При сомнениях оцени показание на основе предыдущего и среднего расхода. "
             "value должен быть числом, без единиц. "
             "raw_text должен содержать распознанный фрагмент около показания и маркера типа."
         )
+
+        if not context:
+            return prompt
+
+        serialized = self._serialize_context(context)
+        return f"{prompt}\n\nИсторический контекст:\n{serialized}"
+
+    def _serialize_context(self, context: dict[str, Any]) -> str:
+        normalized = dict(context)
+
+        def _to_iso(value: Any) -> Any:
+            if isinstance(value, datetime):
+                return value.isoformat()
+            return value
+
+        if "captured_at" in normalized:
+            normalized["captured_at"] = _to_iso(normalized["captured_at"])
+
+        meter_stats = normalized.get("meter_stats")
+        if isinstance(meter_stats, dict):
+            for meter_type, stats in meter_stats.items():
+                if not isinstance(stats, dict):
+                    continue
+                if "previous_captured_at" in stats:
+                    stats["previous_captured_at"] = _to_iso(stats.get("previous_captured_at"))
+                meter_stats[meter_type] = stats
+            normalized["meter_stats"] = meter_stats
+
+        return json.dumps(normalized, ensure_ascii=False, indent=2)

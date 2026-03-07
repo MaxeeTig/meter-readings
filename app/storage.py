@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -27,14 +27,21 @@ class JsonReadingStore:
     ) -> list[ReadingRecord]:
         rows = [ReadingRecord.model_validate(row) for row in self._read_raw()]
 
+        def normalize(dt: datetime) -> datetime:
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+
         if meter_type is not None:
             rows = [r for r in rows if r.meter_type == meter_type]
         if date_from is not None:
-            rows = [r for r in rows if r.captured_at >= date_from]
+            from_dt = normalize(date_from)
+            rows = [r for r in rows if normalize(r.captured_at) >= from_dt]
         if date_to is not None:
-            rows = [r for r in rows if r.captured_at <= date_to]
+            to_dt = normalize(date_to)
+            rows = [r for r in rows if normalize(r.captured_at) <= to_dt]
 
-        rows.sort(key=lambda x: x.captured_at)
+        rows.sort(key=lambda x: normalize(x.captured_at))
         return rows
 
     def append(self, reading: ReadingRecord) -> None:

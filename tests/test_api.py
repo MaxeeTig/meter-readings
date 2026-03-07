@@ -8,7 +8,14 @@ from app.schemas import MeterType, OcrExtraction
 
 
 class FakeOcr:
-    async def extract(self, image_bytes: bytes, filename: str) -> OcrExtraction:
+    async def extract(
+        self,
+        image_bytes: bytes,
+        filename: str,
+        context: dict | None = None,
+    ) -> OcrExtraction:
+        assert context is not None
+        assert "meter_stats" in context
         return OcrExtraction(
             meter_type=MeterType.electricity,
             value=123.45,
