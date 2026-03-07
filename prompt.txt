@@ -1,0 +1,70 @@
+# Target
+Create mobile first web-ui to OCR and store meter readings 
+# Source
+Photo of meters made with mobile phone uploaded via mobile browser
+# Destination
+Local database (json) with dates and readings by meter type
+Possibility to create reports and build graphs 
+# Meters
+- Electricity
+- Hot water
+- Cold water
+# LLM Provider
+Openrouter
+# LLM Models
+Cheap vision model 
+# Output 
+structured output
+- readings
+- indentification of meter as in # Meters section
+# Sample photo 
+./electricity_meter.jpg
+./hot_water_meter.jpg
+./cold_water_meter.jpg
+
+1. Platform/runtime: do you want this as a single local app (frontend + backend), and if so, preferred
+     stack (Next.js, React + Express, Python/FastAPI, etc.)?
+ 2. OCR flow: should OCR run server-side only (recommended, keeps OpenRouter key hidden), or do you also
+     want optional on-device preprocessing?
+  3. Database format: is a single JSON file acceptable (e.g. data/readings.json), or do you want
+     lightweight SQLite with JSON export?
+  4. Reading schema: should each record include timestamp, meter_type, reading_value, unit, image_path,
+     confidence, and raw_model_output?
+  5. Meter identification: should the model auto-detect meter type from image only, or should user select
+     meter type in UI with model verification?
+  6. Editing/approval: should users confirm/edit extracted reading before save (recommended)?
+  7. Reports: what reports are mandatory first version: list/table only, monthly consumption deltas, and
+     line charts by meter?
+  8. Multi-user/auth: is this single-user local app with no login?
+  9. Language/locale: UI and date/number formats in English or Russian (or both)?
+  10. Data retention: should uploaded photos be stored permanently, compressed, or deleted after OCR?
+  11. Error handling: when OCR is uncertain, should app block saving, warn with low-confidence badge, or
+     allow manual override?
+  12. Deployment target: run locally on your machine only, or containerized (Docker) for home server/NAS?
+
+
+
+
+1. Single local app (frontend + backend) Python/FastAPI
+2. OCR server side only 
+3. Single JSON file acceptable 
+4. Reading schema: in general, yes. not sure about image path cause we delete them see q.10 
+btw is it possible to get date from jpg metadata - it will be proved source of truth. 
+if not - we may take date from file name - format of name from smartphone: IMG_20260215_183948.jpg
+
+5. Meter identification: better llm to detect meter type - there is label on photo above readings 
+    - `СВУ-15И' `for hot water meter (round form-factor)
+    - `СВХ-15И' `for cold water meter (round form-factor)
+    - `electricity meter is labeled 'Меркурий 202.1' under readings (square form-factor)
+6. Editing/approval: yes 
+7. Reports: line charts by meter 
+8. Single user 
+9. Language/locale: russian pnly 
+10. After success ocr images should be deleted 
+11. User should be allowed to correct values before storing if ocr uncertain
+12. Test run here on nootebook. Target service will be run on local intel nuc server in local network behind fw and nat 
+suppose 'plain' deploy with no docker 
+
+
+
+

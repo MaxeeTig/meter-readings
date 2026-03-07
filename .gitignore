@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+
+# Virtual environments
+.venv/
+venv/
+
+# Environment files
+.env
+
+# Build / temp artifacts
+tmp_uploads/
+*.tmp
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Frontend (meterface)
+meterface/node_modules/
+meterface/dist/
+
+# Logs
+*.log
