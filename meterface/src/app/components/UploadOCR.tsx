@@ -27,6 +27,7 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (file: File) => {
     if (!file.type.match(/image\/(jpeg|jpg|png|webp|heic)/)) {
@@ -178,6 +179,9 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+    if (cameraInputRef.current) {
+      cameraInputRef.current.value = '';
+    }
   };
 
   return (
@@ -196,9 +200,14 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
           }`}
         >
           <div className="flex flex-col items-center gap-4">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center">
+            <button
+              type="button"
+              onClick={() => cameraInputRef.current?.click()}
+              className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center hover:bg-primary/20 transition-colors cursor-pointer"
+              aria-label="Open camera"
+            >
               <Camera className="w-8 h-8 text-primary" />
-            </div>
+            </button>
             <div>
               <p className="text-foreground mb-1">Drop photo here or</p>
               <button
@@ -207,11 +216,19 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
                 className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-[10px] hover:bg-primary/90 transition-colors min-h-[44px]"
               >
                 <Upload className="w-5 h-5" />
-                Take/Choose Photo
+                Choose Photo
               </button>
             </div>
             <p className="text-xs text-muted-foreground">Accepted: JPG, JPEG, PNG, WEBP, HEIC</p>
           </div>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/jpeg,image/jpg,image/png,image/webp,image/heic"
+            capture="environment"
+            onChange={handleFileChange}
+            className="hidden"
+          />
           <input
             ref={fileInputRef}
             type="file"
