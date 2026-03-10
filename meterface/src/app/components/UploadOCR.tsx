@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import { Camera, FileCheck, Loader2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiBase } from '../api';
 import type { ApiOcrDraftResponse, MeterType, OCRResult } from '../types';
 import { METER_TYPE_LABELS } from '../constants';
 
@@ -84,7 +85,7 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
       const form = new FormData();
       form.append('file', selectedFile);
 
-      const response = await fetch('/api/ocr', {
+      const response = await fetch(`${apiBase}/api/ocr`, {
         method: 'POST',
         body: form,
       });

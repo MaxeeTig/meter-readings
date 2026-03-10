@@ -5,6 +5,7 @@ import { UploadOCR } from './components/UploadOCR';
 import { HistoryList } from './components/HistoryList';
 import { ConsumptionChart } from './components/ConsumptionChart';
 import { MosenergosbytCard } from './components/MosenergosbytCard';
+import { apiBase } from './api';
 import type {
   ApiMosenergosbytMetersResponse,
   ApiReadingRecord,
@@ -47,7 +48,7 @@ function App() {
   const loadReadings = async () => {
     try {
       setIsLoadingHistory(true);
-      const response = await fetch('/api/readings');
+      const response = await fetch(`${apiBase}/api/readings`);
       if (!response.ok) {
         throw new Error('Failed to load readings');
       }
@@ -73,7 +74,7 @@ function App() {
   const loadProviderStatus = async () => {
     try {
       setIsLoadingProvider(true);
-      const response = await fetch('/api/providers/mosenergosbyt/status');
+      const response = await fetch(`${apiBase}/api/providers/mosenergosbyt/status`);
       if (!response.ok) {
         throw new Error('Failed to load provider status');
       }
@@ -91,7 +92,7 @@ function App() {
 
   const loadProviderMeters = async () => {
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/meters');
+      const response = await fetch(`${apiBase}/api/providers/mosenergosbyt/meters`);
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         const message = typeof err?.detail === 'string' ? err.detail : 'Failed to load provider meters';
@@ -142,7 +143,7 @@ function App() {
   }, []);
 
   const handleSaveReading = async (payload: SaveReadingPayload) => {
-    const response = await fetch('/api/readings', {
+    const response = await fetch(`${apiBase}/api/readings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
