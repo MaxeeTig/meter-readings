@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { METER_TYPE_LABELS } from '../constants';
+import { apiBase } from '../api';
 import type {
   MosenergosbytMeter,
   MosenergosbytStatus,
@@ -77,7 +78,7 @@ export function MosenergosbytCard({
 
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/login', {
+      const response = await fetch(`${apiBase}/api/providers/mosenergosbyt/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -96,7 +97,7 @@ export function MosenergosbytCard({
       if (nextStatus.otp_required) {
         const method = nextStatus.selected_kd_tfa ?? 2;
         setSelectedKdTfa(method);
-        const otpResponse = await fetch('/api/providers/mosenergosbyt/otp/send', {
+        const otpResponse = await fetch(`${apiBase}/api/providers/mosenergosbyt/otp/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ kd_tfa: method }),
@@ -123,7 +124,7 @@ export function MosenergosbytCard({
   const handleSendOtp = async (kdTfa: number) => {
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/otp/send', {
+      const response = await fetch(`${apiBase}/api/providers/mosenergosbyt/otp/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kd_tfa: kdTfa }),
@@ -151,7 +152,7 @@ export function MosenergosbytCard({
     }
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/otp/verify', {
+      const response = await fetch(`${apiBase}/api/providers/mosenergosbyt/otp/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -182,7 +183,7 @@ export function MosenergosbytCard({
   const handleDisconnect = async () => {
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/disconnect', {
+      const response = await fetch(`${apiBase}/api/providers/mosenergosbyt/disconnect`, {
         method: 'POST',
       });
       if (!response.ok) {

@@ -146,6 +146,9 @@ class MosenergosbytClient:
                 "(KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
             ),
         }
+        # Keep cookies across calls (login -> Init -> LSList -> AbonentEquipment).
+        # The portal can require cookie-backed session in addition to the `session=` query parameter.
+        self._client = httpx.AsyncClient(timeout=self._timeout, headers=self._headers)
 
     async def login(
         self,
@@ -254,6 +257,11 @@ class MosenergosbytClient:
             payload or {},
             referer="/",
         )
+        # When session is not accepted, the portal responds with `success:false` and err_code=201,
+        # without a `data` list. Treat it as an expired/invalid session rather than "no accounts".
+        if data.get("success") is False and int(data.get("err_code") or 0) == 201:
+            raise MosenergosbytSessionExpired(str(data.get("err_text") or "Session expired"))
+
         if isinstance(data.get("data"), list):
             rows = [row for row in data["data"] if isinstance(row, dict)]
         else:
@@ -277,8 +285,7 @@ class MosenergosbytClient:
         headers = dict(self._headers)
         if referer is not None:
             headers["Referer"] = f"{self._base_url.rstrip('/')}{referer}"
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(url, data=payload, headers=headers)
+        response = await self._client.post(url, data=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):
