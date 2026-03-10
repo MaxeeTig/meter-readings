@@ -273,5 +273,16 @@
     "confidence": 1.0,
     "source_date": "server_time",
     "filename_original": "manual_import_20260307"
+  },
+  {
+    "id": "364d706f-76cb-4ef7-b987-7cc4d286d998",
+    "captured_at": "2026-03-07T16:32:00Z",
+    "saved_at": "2026-03-07T20:04:52.847544",
+    "meter_type": "hot_water",
+    "value": 367.8,
+    "unit": "m3",
+    "confidence": 0.95,
+    "source_date": "exif",
+    "filename_original": "IMG_20260307_193212.jpg"
   }
 ]

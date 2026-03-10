@@ -12,9 +12,30 @@ from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 
 from app.config import Settings
 from app.date_utils import resolve_captured_at
+from app.mosenergosbyt import (
+    MosenergosbytAuthError,
+    MosenergosbytClient,
+    MosenergosbytOtpRequired,
+    MosenergosbytSessionExpired,
+    MosenergosbytState,
+    MosenergosbytStateStore,
+    PendingOtpState,
+)
 from app.ocr import OcrClient, OpenRouterOcrClient
 from app.reports import build_delta_series
-from app.schemas import MeterType, OcrDraftResponse, ReadingRecord, SaveReadingRequest, SourceDate
+from app.schemas import (
+    MeterType,
+    MosenergosbytLoginRequest,
+    MosenergosbytMeterRecord,
+    MosenergosbytMetersResponse,
+    MosenergosbytSendOtpRequest,
+    MosenergosbytStatusResponse,
+    MosenergosbytVerifyOtpRequest,
+    OcrDraftResponse,
+    ReadingRecord,
+    SaveReadingRequest,
+    SourceDate,
+)
 from app.storage import JsonReadingStore
 
 UNITS = {
@@ -143,8 +164,73 @@ ocr_client: OcrClient = OpenRouterOcrClient(
     base_url=settings.openrouter_base_url,
     timeout_seconds=settings.request_timeout_seconds,
 )
+mosenergosbyt_state_store = MosenergosbytStateStore(settings.mosenergosbyt_state_file)
+mosenergosbyt_client = MosenergosbytClient(
+    base_url=settings.mosenergosbyt_base_url,
+    timeout_seconds=settings.request_timeout_seconds,
+    default_kd_tfa=settings.mosenergosbyt_default_kd_tfa,
+)
 
 app = FastAPI(title="Meter Readings Service")
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _to_status_response(state: MosenergosbytState) -> MosenergosbytStatusResponse:
+    otp_methods = []
+    selected_kd_tfa = None
+    if state.pending_otp:
+        otp_methods = state.pending_otp.methods
+        selected_kd_tfa = state.pending_otp.selected_kd_tfa
+    return MosenergosbytStatusResponse(
+        authorized=bool(state.session),
+        otp_required=state.pending_otp is not None,
+        has_device_token=bool(state.vl_tfa_device_token),
+        authorized_at=_parse_dt(state.authorized_at),
+        otp_methods=otp_methods,
+        selected_kd_tfa=selected_kd_tfa,
+    )
+
+
+def _map_portal_meter_type(raw: dict) -> MeterType | None:
+    name = str(raw.get("nm_counter") or "").upper()
+    service = str(raw.get("nm_service") or "").upper()
+    text = f"{name} {service}"
+    if any(token in text for token in ("ХОЛОД", "ХВС", "ХВ", "COLD")):
+        return MeterType.cold_water
+    if any(token in text for token in ("ГОРЯЧ", "ГВС", "ГВ", "HOT")):
+        return MeterType.hot_water
+    if any(token in text for token in ("ЭЛ", "ЭЛЕКТ", "ELECT")):
+        return MeterType.electricity
+    return None
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _map_meter(raw: dict) -> MosenergosbytMeterRecord:
+    return MosenergosbytMeterRecord(
+        meter_type=_map_portal_meter_type(raw),
+        nm_counter=raw.get("nm_counter"),
+        vl_last_indication=_to_float(raw.get("vl_last_indication")),
+        dt_last_indication=raw.get("dt_last_indication"),
+        id_abonent=raw.get("id_abonent"),
+        id_counter=raw.get("id_counter"),
+        id_service=raw.get("id_service"),
+    )
 
 
 @app.get("/")
@@ -269,3 +355,164 @@ async def line_report(
         key.value: [point.model_dump(mode="json") for point in points] for key, points in series.items()
     }
     return response
+
+
+@app.get("/api/providers/mosenergosbyt/status", response_model=MosenergosbytStatusResponse)
+async def mosenergosbyt_status() -> MosenergosbytStatusResponse:
+    state = mosenergosbyt_state_store.load()
+    return _to_status_response(state)
+
+
+@app.post("/api/providers/mosenergosbyt/login", response_model=MosenergosbytStatusResponse)
+async def mosenergosbyt_login(payload: MosenergosbytLoginRequest) -> MosenergosbytStatusResponse:
+    state = mosenergosbyt_state_store.load()
+    try:
+        session_data = await mosenergosbyt_client.login(
+            login=payload.login,
+            password=payload.password,
+            device_info=payload.vl_device_info,
+            device_token=state.vl_tfa_device_token,
+        )
+        await mosenergosbyt_client.init_session(session=session_data.session)
+    except MosenergosbytOtpRequired as exc:
+        next_state = MosenergosbytState(
+            session=None,
+            id_profile=exc.id_profile or state.id_profile,
+            vl_tfa_device_token=state.vl_tfa_device_token,
+            authorized_at=None,
+            pending_otp=PendingOtpState(
+                id_profile=exc.id_profile,
+                vl_tfa_auth_token=exc.vl_tfa_auth_token,
+                methods=exc.methods,
+                started_at=datetime.now(tz=timezone.utc).isoformat(),
+                selected_kd_tfa=mosenergosbyt_client.default_kd_tfa,
+            ),
+        )
+        mosenergosbyt_state_store.save(next_state)
+        return _to_status_response(next_state)
+    except MosenergosbytAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mosenergosbyt login failed: {exc}") from exc
+
+    next_state = MosenergosbytState(
+        session=session_data.session,
+        id_profile=session_data.id_profile or state.id_profile,
+        vl_tfa_device_token=session_data.vl_tfa_device_token or state.vl_tfa_device_token,
+        authorized_at=session_data.authorized_at,
+        pending_otp=None,
+    )
+    mosenergosbyt_state_store.save(next_state)
+    return _to_status_response(next_state)
+
+
+@app.post("/api/providers/mosenergosbyt/otp/send", response_model=MosenergosbytStatusResponse)
+async def mosenergosbyt_send_otp(payload: MosenergosbytSendOtpRequest) -> MosenergosbytStatusResponse:
+    state = mosenergosbyt_state_store.load()
+    pending = state.pending_otp
+    if pending is None:
+        raise HTTPException(status_code=400, detail="OTP is not required right now")
+
+    kd_tfa = payload.kd_tfa if payload.kd_tfa is not None else pending.selected_kd_tfa
+    if kd_tfa is None:
+        kd_tfa = mosenergosbyt_client.default_kd_tfa
+
+    try:
+        send_result = await mosenergosbyt_client.send_tfa(
+            id_profile=pending.id_profile,
+            kd_tfa=kd_tfa,
+            vl_tfa_auth_token=pending.vl_tfa_auth_token,
+        )
+    except MosenergosbytAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mosenergosbyt OTP send failed: {exc}") from exc
+
+    updated_pending = PendingOtpState(
+        id_profile=pending.id_profile,
+        vl_tfa_auth_token=str(send_result.get("vl_tfa_auth_token") or pending.vl_tfa_auth_token),
+        methods=pending.methods,
+        started_at=pending.started_at,
+        selected_kd_tfa=kd_tfa,
+    )
+    next_state = MosenergosbytState(
+        session=state.session,
+        id_profile=state.id_profile,
+        vl_tfa_device_token=state.vl_tfa_device_token,
+        authorized_at=state.authorized_at,
+        pending_otp=updated_pending,
+    )
+    mosenergosbyt_state_store.save(next_state)
+    return _to_status_response(next_state)
+
+
+@app.post("/api/providers/mosenergosbyt/otp/verify", response_model=MosenergosbytStatusResponse)
+async def mosenergosbyt_verify_otp(payload: MosenergosbytVerifyOtpRequest) -> MosenergosbytStatusResponse:
+    state = mosenergosbyt_state_store.load()
+    pending = state.pending_otp
+    if pending is None:
+        raise HTTPException(status_code=400, detail="OTP verification is not expected")
+
+    try:
+        session_data = await mosenergosbyt_client.login(
+            login=payload.login,
+            password=payload.password,
+            device_info=payload.vl_device_info,
+            nn_tfa_code=payload.nn_tfa_code,
+            kd_tfa=payload.kd_tfa,
+        )
+        await mosenergosbyt_client.init_session(session=session_data.session)
+    except MosenergosbytAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except MosenergosbytOtpRequired as exc:
+        next_state = MosenergosbytState(
+            session=None,
+            id_profile=exc.id_profile or state.id_profile,
+            vl_tfa_device_token=state.vl_tfa_device_token,
+            authorized_at=None,
+            pending_otp=PendingOtpState(
+                id_profile=exc.id_profile,
+                vl_tfa_auth_token=exc.vl_tfa_auth_token,
+                methods=exc.methods,
+                started_at=datetime.now(tz=timezone.utc).isoformat(),
+                selected_kd_tfa=payload.kd_tfa,
+            ),
+        )
+        mosenergosbyt_state_store.save(next_state)
+        return _to_status_response(next_state)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Mosenergosbyt OTP verify failed: {exc}") from exc
+
+    next_state = MosenergosbytState(
+        session=session_data.session,
+        id_profile=session_data.id_profile or state.id_profile,
+        vl_tfa_device_token=session_data.vl_tfa_device_token or state.vl_tfa_device_token,
+        authorized_at=session_data.authorized_at,
+        pending_otp=None,
+    )
+    mosenergosbyt_state_store.save(next_state)
+    return _to_status_response(next_state)
+
+
+@app.post("/api/providers/mosenergosbyt/disconnect", response_model=MosenergosbytStatusResponse)
+async def mosenergosbyt_disconnect() -> MosenergosbytStatusResponse:
+    next_state = mosenergosbyt_state_store.clear_session(keep_device_token=True)
+    return _to_status_response(next_state)
+
+
+@app.get("/api/providers/mosenergosbyt/meters", response_model=MosenergosbytMetersResponse)
+async def mosenergosbyt_meters() -> MosenergosbytMetersResponse:
+    state = mosenergosbyt_state_store.load()
+    if not state.session:
+        raise HTTPException(status_code=401, detail="Portal authorization required")
+
+    try:
+        rows = await mosenergosbyt_client.list_meters(session=state.session)
+    except MosenergosbytSessionExpired:
+        mosenergosbyt_state_store.clear_session(keep_device_token=True)
+        raise HTTPException(status_code=401, detail="Portal session expired, please authorize again")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to load portal meters: {exc}") from exc
+
+    meters = [_map_meter(row) for row in rows]
+    return MosenergosbytMetersResponse(meters=meters)

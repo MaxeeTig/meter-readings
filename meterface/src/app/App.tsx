@@ -4,7 +4,15 @@ import { Header } from './components/Header';
 import { UploadOCR } from './components/UploadOCR';
 import { HistoryList } from './components/HistoryList';
 import { ConsumptionChart } from './components/ConsumptionChart';
-import type { ApiReadingRecord, MeterReading, MeterType } from './types';
+import { MosenergosbytCard } from './components/MosenergosbytCard';
+import type {
+  ApiMosenergosbytMetersResponse,
+  ApiReadingRecord,
+  MeterReading,
+  MeterType,
+  MosenergosbytMeter,
+  MosenergosbytStatus,
+} from './types';
 
 interface SaveReadingPayload {
   draftId: string;
@@ -32,6 +40,9 @@ function App() {
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [providerStatus, setProviderStatus] = useState<MosenergosbytStatus | null>(null);
+  const [providerMeters, setProviderMeters] = useState<MosenergosbytMeter[]>([]);
+  const [isLoadingProvider, setIsLoadingProvider] = useState(true);
 
   const loadReadings = async () => {
     try {
@@ -58,6 +69,66 @@ function App() {
   useEffect(() => {
     loadReadings();
   }, []);
+
+  const loadProviderStatus = async () => {
+    try {
+      setIsLoadingProvider(true);
+      const response = await fetch('/api/providers/mosenergosbyt/status');
+      if (!response.ok) {
+        throw new Error('Failed to load provider status');
+      }
+      const nextStatus = (await response.json()) as MosenergosbytStatus;
+      setProviderStatus(nextStatus);
+      setIsOnline(true);
+    } catch (error) {
+      console.error(error);
+      setIsOnline(false);
+      toast.error('Failed to load provider status');
+    } finally {
+      setIsLoadingProvider(false);
+    }
+  };
+
+  const loadProviderMeters = async () => {
+    try {
+      const response = await fetch('/api/providers/mosenergosbyt/meters');
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        const message = typeof err?.detail === 'string' ? err.detail : 'Failed to load provider meters';
+        throw new Error(message);
+      }
+      const data = (await response.json()) as ApiMosenergosbytMetersResponse;
+      const onlyWater = data.meters.filter(
+        (meter) => meter.meter_type === 'hot_water' || meter.meter_type === 'cold_water'
+      );
+      setProviderMeters(onlyWater);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load provider meters';
+      if (message.toLowerCase().includes('session expired') || message.toLowerCase().includes('authorization')) {
+        await loadProviderStatus();
+      } else {
+        toast.error(message);
+      }
+      setProviderMeters([]);
+    }
+  };
+
+  useEffect(() => {
+    loadProviderStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!providerStatus?.authorized) {
+      setProviderMeters([]);
+      return;
+    }
+
+    loadProviderMeters();
+    const interval = window.setInterval(() => {
+      loadProviderMeters();
+    }, 5 * 60 * 1000);
+    return () => window.clearInterval(interval);
+  }, [providerStatus?.authorized]);
 
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
@@ -105,6 +176,13 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
         <div className="lg:hidden space-y-6">
+          <MosenergosbytCard
+            status={providerStatus}
+            meters={providerMeters}
+            isLoading={isLoadingProvider}
+            onStatusRefresh={loadProviderStatus}
+            onMetersRefresh={loadProviderMeters}
+          />
           <UploadOCR onSave={handleSaveReading} />
           <HistoryList readings={readings} onRefresh={handleRefresh} isLoading={isLoadingHistory} />
           <ConsumptionChart readings={readings} />
@@ -114,6 +192,13 @@ function App() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <UploadOCR onSave={handleSaveReading} />
             <div className="space-y-6">
+              <MosenergosbytCard
+                status={providerStatus}
+                meters={providerMeters}
+                isLoading={isLoadingProvider}
+                onStatusRefresh={loadProviderStatus}
+                onMetersRefresh={loadProviderMeters}
+              />
               <HistoryList readings={readings} onRefresh={handleRefresh} isLoading={isLoadingHistory} />
             </div>
           </div>

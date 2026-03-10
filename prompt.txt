@@ -65,6 +65,65 @@ if not - we may take date from file name - format of name from smartphone: IMG_2
 12. Test run here on nootebook. Target service will be run on local intel nuc server in local network behind fw and nat 
 suppose 'plain' deploy with no docker 
 
+===
+
+suggest to improve recognition. 1. send to llm previous reading for each meter 2. send to llm average
+consumption. 3. ask llm to estimate reading and correct accordingly. i mean if recognition returned
+36780 and previous was 364 something is definetly wrong  - in this case two of three red digits
+recognized and added to result (fractions of m3)
+
+=== 
+@mosenergosbyt-api-reference.md
+our target is not only to keep readings locally but also submit them to provider 
+let us discuss flow for water meters submit. electricity will be discussed later - separate provider.
+we investigated our mosenergosbyt portal and collected api's 
+Need to update backend and frontend
+Need to add functions for authorization of user in mosenergosbyt portal with login/password and storing session id.
+also handle edge case with OTP login from new device
+I think some menu item or button needed and probably state "authorized or not"
+If not authorized at mosenergosbyt the system works as is 
+In authorized mode need to show separate frame /card get key parameters of meters and display to user for cross-check.
+At the moment submit flow and api is not known - will be provided later after 14 March.
+Please ask questions and let us plan
+
+*****
+Questions to finalize scope
+
+  1. Is this app single-user on one machine, or multi-user (accounts per user)?
+  2. Should we store Mosenergosbyt login/password at all, or only session/device token and ask password again when needed?
+  3. If credentials are stored, what security level do you want now: plain .env/json, or encrypted at rest?
+  4. OTP UX: should we support method selection (flashcall/sms/email) or default to one method?
+  5. Disconnect behavior: remove only session, or also delete stored device token?
+  6. Do you want auto-refresh of provider meters (e.g., every app open), or only manual “Refresh” button?
+  7. For cross-check card, which fields are mandatory to display first?
+  8. Should provider auth status be global in header, or only inside a dedicated settings/integrations section?
+  If you answer these, I can convert this into a concrete implementation plan and start coding immediately.
+
+=== answers 
+
+1. single user 
+2. Store session and device token, ask for password only if requred (e.g. session dropped by portal)
+3. No strage of user login and pasword
+4. Default to SMS, possibility to change somewhere on config. Option to change will be rarely used only if celluar operator fail 
+5. I think better leave stored device token because it is conected to device
+6. Let us auto-refresh if user  authorized - lesser buttons in UI
+7. Our target is to store actual readings so user should ensure that readings are 1. for correct meter 2. stored properly so i think the following order in card:
+- Meter label (e.g. Hot Water)
+-   "nm_counter": "Г 49065" # this is internal reg. number for user 
+-   "vl_last_indication": 364, # last readings 
+-   "dt_last_indication": "2026-02-15 00:00:00.0" # last readings date 
+8. Maybe we'll do without a separate indicator? If user will clearly understand if it is authorized in portal maybe special status not required.
+What do you think. If we have separate card for meters from portal and user not authorized in portal we place 'Login' or 'Authorize' button there?
+So after authorization user will see readings from portal - if not understood that auth required and press button? 
+
+
+
+
+
+
+
+
+
 
 
 

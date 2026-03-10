@@ -47,3 +47,33 @@ export interface ApiOcrDraftResponse {
   filename_original: string;
   raw_text: string;
 }
+
+export interface MosenergosbytOtpMethod {
+  kd_tfa: number;
+  nm_tfa: string;
+  pr_active: boolean | null;
+  nn_contact: string | null;
+}
+
+export interface MosenergosbytStatus {
+  authorized: boolean;
+  otp_required: boolean;
+  has_device_token: boolean;
+  authorized_at: string | null;
+  otp_methods: MosenergosbytOtpMethod[];
+  selected_kd_tfa: number | null;
+}
+
+export interface MosenergosbytMeter {
+  meter_type: MeterType | null;
+  nm_counter: string | null;
+  vl_last_indication: number | null;
+  dt_last_indication: string | null;
+  id_abonent: number | string | null;
+  id_counter: number | string | null;
+  id_service: number | string | null;
+}
+
+export interface ApiMosenergosbytMetersResponse {
+  meters: MosenergosbytMeter[];
+}

@@ -32,3 +32,4 @@ meterface/dist/
 
 # Logs
 *.log
+*.har

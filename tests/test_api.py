@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import app.main as main
+from app.mosenergosbyt import MosenergosbytState, MosenergosbytStateStore
 from app.schemas import MeterType, OcrExtraction
 
 
@@ -65,3 +66,67 @@ def test_report_endpoint(tmp_path: Path) -> None:
     response = client.get("/api/reports/line")
     assert response.status_code == 200
     assert response.json() == {}
+
+
+def test_mosenergosbyt_status_and_disconnect_keep_device_token(tmp_path: Path) -> None:
+    main.mosenergosbyt_state_store = MosenergosbytStateStore(str(tmp_path / "mosenergosbyt_state.json"))
+    main.mosenergosbyt_state_store.save(
+        MosenergosbytState(
+            session="SESSION",
+            id_profile="profile",
+            vl_tfa_device_token="device-token",
+            authorized_at="2026-03-01T12:00:00+00:00",
+        )
+    )
+
+    client = TestClient(main.app)
+
+    status_resp = client.get("/api/providers/mosenergosbyt/status")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["authorized"] is True
+    assert status_resp.json()["has_device_token"] is True
+
+    disconnect_resp = client.post("/api/providers/mosenergosbyt/disconnect")
+    assert disconnect_resp.status_code == 200
+    data = disconnect_resp.json()
+    assert data["authorized"] is False
+    assert data["has_device_token"] is True
+
+
+def test_mosenergosbyt_meters_maps_russian_service_names(tmp_path: Path) -> None:
+    class FakeMosenergosbytClient:
+        async def list_meters(self, *, session: str) -> list[dict]:
+            assert session == "SESSION"
+            return [
+                {
+                    "nm_counter": "Г 49065",
+                    "nm_service": "ГОРЯЧЕЕ В/С (НОСИТЕЛЬ)",
+                    "vl_last_indication": 364,
+                    "dt_last_indication": "2026-02-15 00:00:00.0",
+                    "id_abonent": 9439925,
+                    "id_counter": 35738177,
+                    "id_service": 3740,
+                },
+                {
+                    "nm_counter": "Х 24692",
+                    "nm_service": "ХОЛОДНОЕ В/С",
+                    "vl_last_indication": 522,
+                    "dt_last_indication": "2026-02-15 00:00:00.0",
+                    "id_abonent": 9439925,
+                    "id_counter": 31039410,
+                    "id_service": 29508,
+                },
+            ]
+
+    main.mosenergosbyt_state_store = MosenergosbytStateStore(str(tmp_path / "mosenergosbyt_state.json"))
+    main.mosenergosbyt_state_store.save(MosenergosbytState(session="SESSION"))
+    main.mosenergosbyt_client = FakeMosenergosbytClient()
+
+    client = TestClient(main.app)
+    response = client.get("/api/providers/mosenergosbyt/meters")
+    assert response.status_code == 200
+
+    meters = response.json()["meters"]
+    assert len(meters) == 2
+    assert meters[0]["meter_type"] == "hot_water"
+    assert meters[1]["meter_type"] == "cold_water"

@@ -15,6 +15,9 @@ class Settings:
     data_file: str
     upload_dir: str
     request_timeout_seconds: int
+    mosenergosbyt_base_url: str
+    mosenergosbyt_state_file: str
+    mosenergosbyt_default_kd_tfa: int
 
 
     @staticmethod
@@ -30,4 +33,10 @@ class Settings:
             data_file=os.getenv("DATA_FILE", "./data/readings.json").strip(),
             upload_dir=os.getenv("UPLOAD_DIR", "./tmp_uploads").strip(),
             request_timeout_seconds=int(os.getenv("REQUEST_TIMEOUT_SECONDS", "45")),
+            mosenergosbyt_base_url=os.getenv("MOSENERGOSBYT_BASE_URL", "https://my.mosenergosbyt.ru").strip(),
+            mosenergosbyt_state_file=os.getenv(
+                "MOSENERGOSBYT_STATE_FILE",
+                "./data/mosenergosbyt_state.json",
+            ).strip(),
+            mosenergosbyt_default_kd_tfa=int(os.getenv("MOSENERGOSBYT_DEFAULT_KD_TFA", "2")),
         )

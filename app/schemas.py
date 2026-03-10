@@ -66,3 +66,51 @@ class OcrExtraction(BaseModel):
 class OcrError(BaseModel):
     detail: str
     code: Literal["ocr_failed", "invalid_response", "invalid_number"]
+
+
+class MosenergosbytOtpMethod(BaseModel):
+    kd_tfa: int
+    nm_tfa: str
+    pr_active: bool | None = None
+    nn_contact: str | None = None
+
+
+class MosenergosbytStatusResponse(BaseModel):
+    authorized: bool
+    otp_required: bool
+    has_device_token: bool
+    authorized_at: datetime | None = None
+    otp_methods: list[MosenergosbytOtpMethod] = Field(default_factory=list)
+    selected_kd_tfa: int | None = None
+
+
+class MosenergosbytLoginRequest(BaseModel):
+    login: str
+    password: str
+    vl_device_info: str
+
+
+class MosenergosbytSendOtpRequest(BaseModel):
+    kd_tfa: int | None = None
+
+
+class MosenergosbytVerifyOtpRequest(BaseModel):
+    login: str
+    password: str
+    vl_device_info: str
+    nn_tfa_code: str
+    kd_tfa: int
+
+
+class MosenergosbytMeterRecord(BaseModel):
+    meter_type: MeterType | None = None
+    nm_counter: str | None = None
+    vl_last_indication: float | None = None
+    dt_last_indication: str | None = None
+    id_abonent: int | str | None = None
+    id_counter: int | str | None = None
+    id_service: int | str | None = None
+
+
+class MosenergosbytMetersResponse(BaseModel):
+    meters: list[MosenergosbytMeterRecord]

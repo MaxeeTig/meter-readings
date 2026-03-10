@@ -42,6 +42,12 @@ npm run dev
 - `POST /api/readings` - сохранить подтвержденную запись
 - `GET /api/readings` - список записей
 - `GET /api/reports/line` - дельта-данные для графика
+- `GET /api/providers/mosenergosbyt/status` - статус авторизации в портале
+- `POST /api/providers/mosenergosbyt/login` - логин в портал (может вернуть OTP-required)
+- `POST /api/providers/mosenergosbyt/otp/send` - отправить OTP-код
+- `POST /api/providers/mosenergosbyt/otp/verify` - подтвердить OTP и завершить логин
+- `POST /api/providers/mosenergosbyt/disconnect` - сбросить сессию (токен устройства сохраняется)
+- `GET /api/providers/mosenergosbyt/meters` - получить список счетчиков из портала
 
 ## Примечания
 - Источник даты: EXIF -> имя файла `IMG_YYYYMMDD_HHMMSS` -> текущее время сервера.
