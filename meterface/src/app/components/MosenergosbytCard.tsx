@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { METER_TYPE_LABELS } from '../constants';
+import { apiBase } from '../api';
 import type {
   MosenergosbytMeter,
   MosenergosbytStatus,

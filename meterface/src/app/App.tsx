@@ -5,6 +5,7 @@ import { UploadOCR } from './components/UploadOCR';
 import { HistoryList } from './components/HistoryList';
 import { ConsumptionChart } from './components/ConsumptionChart';
 import { MosenergosbytCard } from './components/MosenergosbytCard';
+import { apiBase } from './api';
 import type {
   ApiMosenergosbytMetersResponse,
   ApiReadingRecord,
