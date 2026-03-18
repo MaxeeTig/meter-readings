@@ -40,6 +40,9 @@ function mapApiReading(row: ApiReadingRecord): MeterReading {
 }
 
 function App() {
+  const appVersion = import.meta.env.VITE_APP_VERSION || 'dev';
+  const buildTimeRaw = import.meta.env.VITE_APP_BUILD_TIME;
+  const buildTime = buildTimeRaw ? new Date(buildTimeRaw).toLocaleString() : 'unknown';
   const [readings, setReadings] = useState<MeterReading[]>([]);
   const [isOnline, setIsOnline] = useState(true);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
@@ -215,6 +218,10 @@ function App() {
           <ConsumptionChart readings={readings} />
         </div>
       </main>
+
+      <footer className="pb-6 text-center text-xs text-muted-foreground">
+        Version {appVersion} · Built {buildTime}
+      </footer>
 
       <Toaster position="top-center" richColors />
     </div>

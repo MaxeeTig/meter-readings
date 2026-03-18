@@ -1,6 +1,6 @@
 # Mosenergosbyt portal — API reference (HTTP-level)
 
-По результатам разбора `mosenergosbyt-auth-trace.har`, `mosenergosbyt-auth-trace_readings.har` и `my.mosenergosbyt.ru_otp_auth.har` (OTP при входе с нового устройства). Для воспроизведения запросов из скрипта (curl, Python requests и т.д.).
+По результатам разбора `mosenergosbyt-auth-trace.har`, `mosenergosbyt-auth-trace_readings.har`, `mosenergosbyt-auth-trace_readings_submit_hot_water.har` (отправка показаний ГВС, 14.03.2026) и `my.mosenergosbyt.ru_otp_auth.har` (OTP при входе с нового устройства). Для воспроизведения запросов из скрипта (curl, Python requests и т.д.).
 
 ---
 
@@ -16,6 +16,7 @@
 | 2 | **Init** | Recommended — portal does it right after login |
 | 3 | **LSList** or **LSListEditable** | Yes — get accounts; each has `id_abonent` for step 4 |
 | 4 | **smorodinaTransProxy** (AbonentEquipment) | Yes — get list of meters per account |
+| 5 | **AbonentSaveIndication** | For submitting readings — one request per meter/reading (see §4) |
 
 Calls from section 2 such as `MenuSettings`, `GetSectionMetadata`, `GetSectionElementsDtCache`, `IndicationIsFloat`, `GetPowSupProviders`, `GetProfileAttributesValues`, etc. are used by the portal for UI (menu, form metadata, cache, float-indication check) and are **not required** just to authorize and get the list of meters.
 
@@ -290,6 +291,7 @@ Referer: https://my.mosenergosbyt.ru/auth
 | GetSectionElementsDtCache | Кэш элементов разделов | Нет |
 | GetSectionMetadata | Метаданные секции (форма показаний и др.) | Нет |
 | IndicationIsFloat | Признак дробных показаний по id_service | Нет (для отправки — да) |
+| AbonentSaveIndication | Отправка показаний по счётчику | Да (для submit) |
 | GetCriticalNotice | Критические уведомления | Нет |
 | SendTfa | Отправка кода OTP (SMS/flashcall/e-mail) при входе с нового устройства | Да (в сценарии OTP, без session) |
 | CheckNeedPhoneConfirm | Проверка необходимости подтверждения телефона | Нет |
@@ -367,9 +369,63 @@ plugin=smorodinaTransProxy&proxyquery=AbonentEquipment&vl_provider=%7B%22id_abon
 
 ---
 
-## 4. Отправка показаний (submit)
+## 4. Отправка показаний (submit) — AbonentSaveIndication
 
-Сам запрос **отправки** показаний (после нажатия «Отправить» в форме) в текущей трассе не попал — в момент снятия трассы период приёма был неактивен. Когда он откроется (дни 14–19 по полю из п. 3.4), стоит снять ещё один HAR на действие «Отправить» и добавить сюда `query` и тело запроса (скорее всего отдельный `query` вида SaveIndication / SendIndication и т.п.).
+По трассе `mosenergosbyt-auth-trace_readings_submit_hot_water.har` (14.03.2026): отправка выполняется отдельным запросом **AbonentSaveIndication**. Один запрос — одно показание по одному счётчику; для нескольких счётчиков нужны отдельные вызовы.
+
+### 4.1 Запрос
+
+```http
+POST /gate_lkcomu?action=sql&query=AbonentSaveIndication&session=<SESSION> HTTP/1.1
+Host: my.mosenergosbyt.ru
+Content-Type: application/x-www-form-urlencoded
+Origin: https://my.mosenergosbyt.ru
+Referer: https://my.mosenergosbyt.ru/accounts/<id_service>/transfer-indications
+
+dt_indication=<ISO_DATETIME>&id_counter=<ID_COUNTER>&id_counter_zn=<ID_COUNTER_ZN>&id_source=<ID_SOURCE>&plugin=propagateMoeInd&pr_skip_anomaly=0&pr_skip_err=0&vl_indication=<VALUE>&vl_provider=<URL_ENCODED_JSON>
+```
+
+**Тело (form-urlencoded):**
+
+| Параметр | Описание | Пример (из трассы) |
+|----------|----------|---------------------|
+| dt_indication | Дата/время показания (ISO 8601, с таймзоной) | `2026-03-14T08:59:59+03:00` |
+| id_counter | ID счётчика (из AbonentEquipment) | `35738177` |
+| id_counter_zn | Значение счётчика/зоны (из AbonentEquipment, обычно `"1"`) | `1` |
+| id_source | ID источника/секции формы (из метаданных портала) | `15418` |
+| plugin | Фиксированное значение | `propagateMoeInd` |
+| pr_skip_anomaly | Проверка аномалий (0 = проверять) | `0` |
+| pr_skip_err | Проверка ошибок (0 = проверять) | `0` |
+| vl_indication | Передаваемое показание (число, целое или дробное по IndicationIsFloat) | `368` |
+| vl_provider | URL-encoded JSON: `{"id_abonent": <id_abonent>}` | `%7B%22id_abonent%22%3A%209439925%7D` |
+
+Все перечисленные параметры в трассе присутствовали; `id_source` может зависеть от поставщика/секции (в трассе — ГВС, МосОблЕИРЦ).
+
+### 4.2 Ответ при успехе (200, JSON)
+
+```json
+{
+  "success": true,
+  "total": 1,
+  "data": [{
+    "kd_result": 1000,
+    "nm_result": "Показания успешно переданы"
+  }],
+  "metaData": { "responseTime": 0.033 }
+}
+```
+
+- **kd_result: 1000** — успешная передача показаний.
+- **nm_result** — текст сообщения для пользователя.
+
+### 4.3 Порядок вызовов для submit
+
+1. **Login** → **Init** → **LSList** (или LSListEditable) → **smorodinaTransProxy** (AbonentEquipment) — как в разделе «Straightforward flow», чтобы получить `id_abonent` и список счётчиков с `id_counter`, `id_counter_zn`.
+2. При необходимости: **GetSectionMetadata** (для меток/валидации формы), **IndicationIsFloat** (чтобы знать, допускаются ли дробные показания).
+3. **AbonentSaveIndication** — для каждого счётчика и каждого передаваемого показания, с телом по п. 4.1.
+4. После успешной отправки портал может повторно вызвать **smorodinaTransProxy** (AbonentEquipment), чтобы обновить список (в т.ч. последнее показание).
+
+Передавать показания можно только в период приёма: с `nn_ind_receive_start` по `nn_ind_receive_end` число месяца (см. раздел 3.4).
 
 ---
 
@@ -406,6 +462,20 @@ curl -s -X POST "https://my.mosenergosbyt.ru/gate_lkcomu?action=sql&query=smorod
 ```
 
 После шага 4 в `data` — массив счётчиков (поля см. в разделе 3.4). Для нескольких ЛС шаг 4 повторять для каждого `id_abonent` из шага 3.
+
+**Отправка одного показания (после шагов 1–4):**
+
+```bash
+# Переменные: SESSION, ID_ABONENT, id_counter, id_counter_zn, vl_indication, id_source (из метаданных/трассы — напр. 15418)
+VL_PROVIDER=$(echo "{\"id_abonent\": $ID_ABONENT}" | jq -sRr @uri)
+DT_INDICATION=$(date -Iseconds)   # или фиксированная дата в периоде приёма
+curl -s -X POST "https://my.mosenergosbyt.ru/gate_lkcomu?action=sql&query=AbonentSaveIndication&session=$SESSION" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -H 'Referer: https://my.mosenergosbyt.ru/accounts/23868602/transfer-indications' \
+  -d "dt_indication=$DT_INDICATION&id_counter=35738177&id_counter_zn=1&id_source=15418&plugin=propagateMoeInd&pr_skip_anomaly=0&pr_skip_err=0&vl_indication=368&vl_provider=$VL_PROVIDER" \
+  | jq .
+# Успех: data[0].kd_result == 1000, nm_result "Показания успешно переданы"
+```
 
 ---
 
