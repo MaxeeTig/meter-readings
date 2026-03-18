@@ -67,13 +67,36 @@ export interface MosenergosbytStatus {
 export interface MosenergosbytMeter {
   meter_type: MeterType | null;
   nm_counter: string | null;
+  nm_service: string | null;
+  nm_measure_unit: string | null;
   vl_last_indication: number | null;
+  vl_indication: number | null;
   dt_last_indication: string | null;
+  dt_indication: string | null;
+  nn_ind_receive_start: number | null;
+  nn_ind_receive_end: number | null;
+  pr_state: number | null;
+  nm_no_access_reason: string | null;
   id_abonent: number | string | null;
   id_counter: number | string | null;
+  id_counter_zn: number | string | null;
   id_service: number | string | null;
 }
 
 export interface ApiMosenergosbytMetersResponse {
   meters: MosenergosbytMeter[];
+}
+
+export interface MosenergosbytSubmitRequest {
+  id_abonent: number | string;
+  id_service: number | string;
+  id_counter: number | string;
+  id_counter_zn?: number | string | null;
+  value: number;
+}
+
+export interface MosenergosbytSubmitResponse {
+  success: boolean;
+  message: string;
+  portal_code: number | null;
 }

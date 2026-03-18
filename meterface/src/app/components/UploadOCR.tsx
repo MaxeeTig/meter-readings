@@ -1,8 +1,16 @@
 import { useRef, useState } from 'react';
 import { Camera, FileCheck, Loader2, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
-import type { ApiOcrDraftResponse, MeterType, OCRResult } from '../types';
+import type {
+  ApiOcrDraftResponse,
+  MeterType,
+  MosenergosbytMeter,
+  MosenergosbytStatus,
+  OCRResult,
+} from '../types';
 import { METER_TYPE_LABELS } from '../constants';
+
+const API_BASE = import.meta.env.VITE_APP_API_BASE || '';
 
 interface UploadOCRProps {
   onSave: (payload: {
@@ -11,19 +19,24 @@ interface UploadOCRProps {
     value: number;
     capturedAt: string;
   }) => Promise<void>;
+  providerStatus: MosenergosbytStatus | null;
+  providerMeters: MosenergosbytMeter[];
+  onPortalRefresh: () => Promise<void>;
 }
 
-export function UploadOCR({ onSave }: UploadOCRProps) {
+export function UploadOCR({ onSave, providerStatus, providerMeters, onPortalRefresh }: UploadOCRProps) {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSubmittingPortal, setIsSubmittingPortal] = useState(false);
   const [ocrResult, setOcrResult] = useState<OCRResult | null>(null);
   const [formData, setFormData] = useState({
     meterType: '' as MeterType | '',
     value: '',
     datetime: '',
   });
+  const [portalMeterId, setPortalMeterId] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -84,7 +97,7 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
       const form = new FormData();
       form.append('file', selectedFile);
 
-      const response = await fetch('/api/ocr', {
+      const response = await fetch(`${API_BASE}/api/ocr`, {
         method: 'POST',
         body: form,
       });
@@ -144,6 +157,52 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleMeterTypeChange = (nextType: MeterType | '') => {
+    setFormData({ ...formData, meterType: nextType });
+    if (!nextType) {
+      setPortalMeterId('');
+      return;
+    }
+    const matches = providerMeters.filter((meter) => meter.meter_type === nextType);
+    if (matches.length === 1 && matches[0].id_counter != null) {
+      setPortalMeterId(String(matches[0].id_counter));
+    } else {
+      setPortalMeterId('');
+    }
+  };
+
+  const portalAuthorized = providerStatus?.authorized ?? false;
+  const matchingMeters = formData.meterType
+    ? providerMeters.filter((meter) => meter.meter_type === formData.meterType)
+    : [];
+  const selectedPortalMeter =
+    matchingMeters.find((meter) => String(meter.id_counter) === portalMeterId) ??
+    (matchingMeters.length === 1 ? matchingMeters[0] : null);
+  const canSubmitPortal = portalAuthorized && Boolean(selectedPortalMeter) && Boolean(formData.value);
+
+  const validatePortalSubmit = () => {
+    const newErrors: Record<string, string> = {};
+    if (!ocrResult) {
+      newErrors.file = 'Run OCR before submitting';
+    }
+    if (!formData.meterType) {
+      newErrors.meterType = 'Meter type is required';
+    }
+    if (!formData.value) {
+      newErrors.value = 'Reading value is required';
+    } else if (isNaN(Number(formData.value)) || Number(formData.value) < 0) {
+      newErrors.value = 'Please enter a valid non-negative number';
+    }
+    if (!portalAuthorized) {
+      newErrors.portal = 'Connect to Mosenergosbyt portal first';
+    }
+    if (!selectedPortalMeter) {
+      newErrors.portal = 'Select a portal meter to submit';
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSave = async () => {
     if (!validate() || !ocrResult) return;
 
@@ -166,6 +225,42 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
     }
   };
 
+  const handleSubmitPortal = async () => {
+    if (!validatePortalSubmit() || !selectedPortalMeter) return;
+    if (!selectedPortalMeter.id_abonent || !selectedPortalMeter.id_service || !selectedPortalMeter.id_counter) {
+      toast.error('Missing portal meter identifiers');
+      return;
+    }
+    setIsSubmittingPortal(true);
+    try {
+      const response = await fetch(`${API_BASE}/api/providers/mosenergosbyt/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_abonent: selectedPortalMeter.id_abonent,
+          id_service: selectedPortalMeter.id_service,
+          id_counter: selectedPortalMeter.id_counter,
+          id_counter_zn: selectedPortalMeter.id_counter_zn ?? null,
+          value: Number(formData.value),
+        }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        const message = typeof err?.detail === 'string' ? err.detail : 'Failed to submit to portal';
+        throw new Error(message);
+      }
+      const data = (await response.json()) as { message?: string };
+      toast.success(data.message || 'Submitted to portal');
+      await onPortalRefresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to submit to portal';
+      toast.error(message);
+      setErrors({ portal: message });
+    } finally {
+      setIsSubmittingPortal(false);
+    }
+  };
+
   const handleReset = () => {
     setSelectedFile(null);
     setPreview('');
@@ -175,6 +270,7 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
       value: '',
       datetime: '',
     });
+    setPortalMeterId('');
     setErrors({});
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -307,7 +403,7 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
                 <select
                   id="meterType"
                   value={formData.meterType}
-                  onChange={(e) => setFormData({ ...formData, meterType: e.target.value as MeterType })}
+                  onChange={(e) => handleMeterTypeChange(e.target.value as MeterType)}
                   className={`w-full px-4 py-3 bg-input-background border rounded-[10px] min-h-[44px] ${
                     errors.meterType ? 'border-destructive' : 'border-border'
                   }`}
@@ -322,6 +418,34 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
                   ))}
                 </select>
               </div>
+
+              {portalAuthorized && (
+                <div>
+                  <label className="block mb-2">Portal meter</label>
+                  {matchingMeters.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No portal meters match this meter type.</p>
+                  ) : matchingMeters.length === 1 ? (
+                    <p className="text-sm text-muted-foreground">
+                      {matchingMeters[0].nm_counter ?? 'Selected portal meter'}
+                    </p>
+                  ) : (
+                    <select
+                      value={portalMeterId}
+                      onChange={(e) => setPortalMeterId(e.target.value)}
+                      className="w-full px-4 py-3 bg-input-background border rounded-[10px] min-h-[44px] border-border"
+                    >
+                      <option value="" disabled>
+                        Select portal meter
+                      </option>
+                      {matchingMeters.map((meter) => (
+                        <option key={String(meter.id_counter)} value={String(meter.id_counter)}>
+                          {meter.nm_counter ?? `Meter ${meter.id_counter}`}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label htmlFor="value" className="block mb-2">
@@ -362,6 +486,14 @@ export function UploadOCR({ onSave }: UploadOCRProps) {
                   className="flex-1 sm:flex-initial px-6 py-3 bg-primary text-primary-foreground rounded-[10px] hover:bg-primary/90 transition-colors min-h-[44px] disabled:opacity-60"
                 >
                   {isSaving ? 'Saving...' : 'Save Reading'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSubmitPortal}
+                  disabled={!canSubmitPortal || isSubmittingPortal}
+                  className="flex-1 sm:flex-initial px-6 py-3 bg-secondary text-secondary-foreground rounded-[10px] hover:bg-secondary/90 transition-colors min-h-[44px] disabled:opacity-60"
+                >
+                  {isSubmittingPortal ? 'Submitting...' : 'Submit to Portal'}
                 </button>
                 <button
                   type="button"

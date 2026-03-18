@@ -43,6 +43,7 @@ Single-page layout with 4 vertical sections:
   - Notes (optional, textarea)
 - Action buttons:
   - Primary: “Save Reading”
+  - Secondary: “Submit to Portal” (active only if portal authorized and portal meter selected; uses edited Reading value)
   - Secondary: “Reset”
 - Validation:
   - required: meter type, value, datetime
@@ -72,6 +73,7 @@ Single-page layout with 4 vertical sections:
 - `POST /api/readings` -> saves confirmed edited data.
 - `GET /api/readings` -> populate history.
 - `GET /api/reports/line` -> chart dataset.
+- `POST /api/providers/mosenergosbyt/submit` -> submit edited reading to portal.
 
 ## Interaction rules
 - Never auto-save OCR result without user click on “Save Reading”.
@@ -96,4 +98,3 @@ Single-page layout with 4 vertical sections:
 - Full keyboard navigation.
 - Proper labels/aria for all form controls.
 - Live region announcements for OCR progress and save result.
-

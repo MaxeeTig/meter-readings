@@ -14,6 +14,8 @@ import type {
   MosenergosbytStatus,
 } from './types';
 
+const API_BASE = import.meta.env.VITE_APP_API_BASE || '';
+
 interface SaveReadingPayload {
   draftId: string;
   meterType: MeterType;
@@ -47,7 +49,7 @@ function App() {
   const loadReadings = async () => {
     try {
       setIsLoadingHistory(true);
-      const response = await fetch('/api/readings');
+      const response = await fetch(`${API_BASE}/api/readings`);
       if (!response.ok) {
         throw new Error('Failed to load readings');
       }
@@ -73,7 +75,7 @@ function App() {
   const loadProviderStatus = async () => {
     try {
       setIsLoadingProvider(true);
-      const response = await fetch('/api/providers/mosenergosbyt/status');
+      const response = await fetch(`${API_BASE}/api/providers/mosenergosbyt/status`);
       if (!response.ok) {
         throw new Error('Failed to load provider status');
       }
@@ -91,17 +93,14 @@ function App() {
 
   const loadProviderMeters = async () => {
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/meters');
+      const response = await fetch(`${API_BASE}/api/providers/mosenergosbyt/meters`);
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         const message = typeof err?.detail === 'string' ? err.detail : 'Failed to load provider meters';
         throw new Error(message);
       }
       const data = (await response.json()) as ApiMosenergosbytMetersResponse;
-      const onlyWater = data.meters.filter(
-        (meter) => meter.meter_type === 'hot_water' || meter.meter_type === 'cold_water'
-      );
-      setProviderMeters(onlyWater);
+      setProviderMeters(data.meters);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load provider meters';
       if (message.toLowerCase().includes('session expired') || message.toLowerCase().includes('authorization')) {
@@ -142,7 +141,7 @@ function App() {
   }, []);
 
   const handleSaveReading = async (payload: SaveReadingPayload) => {
-    const response = await fetch('/api/readings', {
+    const response = await fetch(`${API_BASE}/api/readings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -183,14 +182,24 @@ function App() {
             onStatusRefresh={loadProviderStatus}
             onMetersRefresh={loadProviderMeters}
           />
-          <UploadOCR onSave={handleSaveReading} />
+          <UploadOCR
+            onSave={handleSaveReading}
+            providerStatus={providerStatus}
+            providerMeters={providerMeters}
+            onPortalRefresh={loadProviderMeters}
+          />
           <HistoryList readings={readings} onRefresh={handleRefresh} isLoading={isLoadingHistory} />
           <ConsumptionChart readings={readings} />
         </div>
 
         <div className="hidden lg:block space-y-6">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <UploadOCR onSave={handleSaveReading} />
+            <UploadOCR
+              onSave={handleSaveReading}
+              providerStatus={providerStatus}
+              providerMeters={providerMeters}
+              onPortalRefresh={loadProviderMeters}
+            />
             <div className="space-y-6">
               <MosenergosbytCard
                 status={providerStatus}

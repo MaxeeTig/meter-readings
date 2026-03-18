@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from statistics import mean
@@ -28,6 +28,8 @@ from app.schemas import (
     MosenergosbytLoginRequest,
     MosenergosbytMeterRecord,
     MosenergosbytMetersResponse,
+    MosenergosbytSubmitRequest,
+    MosenergosbytSubmitResponse,
     MosenergosbytSendOtpRequest,
     MosenergosbytStatusResponse,
     MosenergosbytVerifyOtpRequest,
@@ -221,14 +223,55 @@ def _to_float(value: object) -> float | None:
         return None
 
 
+def _to_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _moscow_now() -> datetime:
+    return datetime.now(timezone(timedelta(hours=3)))
+
+
+def _in_receive_period(meter: dict) -> bool:
+    start = _to_int(meter.get("nn_ind_receive_start"))
+    end = _to_int(meter.get("nn_ind_receive_end"))
+    if start is None or end is None:
+        return True
+    day = _moscow_now().day
+    return start <= day <= end
+
+
+def _meter_accessible(meter: dict) -> tuple[bool, str | None]:
+    pr_state = _to_int(meter.get("pr_state"))
+    if pr_state is not None and pr_state != 1:
+        return False, f"Meter is not available for submit (pr_state={pr_state})."
+    reason = meter.get("nm_no_access_reason")
+    if reason:
+        return False, f"No access: {reason}"
+    return True, None
+
+
 def _map_meter(raw: dict) -> MosenergosbytMeterRecord:
     return MosenergosbytMeterRecord(
         meter_type=_map_portal_meter_type(raw),
         nm_counter=raw.get("nm_counter"),
+        nm_service=raw.get("nm_service"),
+        nm_measure_unit=raw.get("nm_measure_unit"),
         vl_last_indication=_to_float(raw.get("vl_last_indication")),
+        vl_indication=_to_float(raw.get("vl_indication")),
         dt_last_indication=raw.get("dt_last_indication"),
+        dt_indication=raw.get("dt_indication"),
+        nn_ind_receive_start=_to_int(raw.get("nn_ind_receive_start")),
+        nn_ind_receive_end=_to_int(raw.get("nn_ind_receive_end")),
+        pr_state=_to_int(raw.get("pr_state")),
+        nm_no_access_reason=raw.get("nm_no_access_reason"),
         id_abonent=raw.get("id_abonent"),
         id_counter=raw.get("id_counter"),
+        id_counter_zn=raw.get("id_counter_zn"),
         id_service=raw.get("id_service"),
     )
 
@@ -516,3 +559,83 @@ async def mosenergosbyt_meters() -> MosenergosbytMetersResponse:
 
     meters = [_map_meter(row) for row in rows]
     return MosenergosbytMetersResponse(meters=meters)
+
+
+@app.post("/api/providers/mosenergosbyt/submit", response_model=MosenergosbytSubmitResponse)
+async def mosenergosbyt_submit(payload: MosenergosbytSubmitRequest) -> MosenergosbytSubmitResponse:
+    state = mosenergosbyt_state_store.load()
+    if not state.session:
+        raise HTTPException(status_code=401, detail="Portal authorization required")
+
+    try:
+        rows = await mosenergosbyt_client.list_meters(session=state.session)
+    except MosenergosbytSessionExpired:
+        mosenergosbyt_state_store.clear_session(keep_device_token=True)
+        raise HTTPException(status_code=401, detail="Portal session expired, please authorize again")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to load portal meters: {exc}") from exc
+
+    target = None
+    for row in rows:
+        if str(row.get("id_counter")) == str(payload.id_counter) and str(row.get("id_abonent")) == str(
+            payload.id_abonent
+        ):
+            target = row
+            break
+
+    if target is None:
+        raise HTTPException(status_code=404, detail="Meter not found in portal account list")
+
+    if target.get("id_service") is not None and str(target.get("id_service")) != str(payload.id_service):
+        raise HTTPException(status_code=400, detail="Meter service mismatch")
+
+    allowed, reason = _meter_accessible(target)
+    if not allowed:
+        raise HTTPException(status_code=400, detail=reason or "Meter is not available for submit")
+
+    if not _in_receive_period(target):
+        start = _to_int(target.get("nn_ind_receive_start"))
+        end = _to_int(target.get("nn_ind_receive_end"))
+        if start is not None and end is not None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Receive period is {start}–{end} day of month",
+            )
+        raise HTTPException(status_code=400, detail="Receive period is closed")
+
+    try:
+        pr_float = await mosenergosbyt_client.indication_is_float(
+            session=state.session,
+            id_service=payload.id_service,
+        )
+    except MosenergosbytSessionExpired:
+        mosenergosbyt_state_store.clear_session(keep_device_token=True)
+        raise HTTPException(status_code=401, detail="Portal session expired, please authorize again")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to validate indication format: {exc}") from exc
+
+    if not pr_float and abs(payload.value - round(payload.value)) > 1e-9:
+        raise HTTPException(status_code=400, detail="This meter accepts only integer indications")
+
+    id_counter_zn = payload.id_counter_zn or target.get("id_counter_zn") or "1"
+
+    try:
+        success, message, portal_code = await mosenergosbyt_client.submit_indication(
+            session=state.session,
+            id_abonent=payload.id_abonent,
+            id_service=payload.id_service,
+            id_counter=payload.id_counter,
+            id_counter_zn=id_counter_zn,
+            id_source=settings.mosenergosbyt_id_source,
+            value=payload.value,
+        )
+    except MosenergosbytSessionExpired:
+        mosenergosbyt_state_store.clear_session(keep_device_token=True)
+        raise HTTPException(status_code=401, detail="Portal session expired, please authorize again")
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Submit failed: {exc}") from exc
+
+    if not success:
+        raise HTTPException(status_code=400, detail=message or "Submit failed")
+
+    return MosenergosbytSubmitResponse(success=True, message=message or "Показания успешно переданы", portal_code=portal_code)

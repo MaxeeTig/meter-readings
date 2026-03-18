@@ -8,6 +8,8 @@ import type {
   MosenergosbytOtpMethod,
 } from '../types';
 
+const API_BASE = import.meta.env.VITE_APP_API_BASE || '';
+
 interface MosenergosbytCardProps {
   status: MosenergosbytStatus | null;
   meters: MosenergosbytMeter[];
@@ -38,6 +40,22 @@ function formatLastReadingDate(value: string | null): string {
     return value;
   }
   return parsed.toLocaleString();
+}
+
+function inReceivePeriod(meter: MosenergosbytMeter): boolean {
+  if (meter.nn_ind_receive_start == null || meter.nn_ind_receive_end == null) return true;
+  const day = new Date().getDate();
+  return day >= meter.nn_ind_receive_start && day <= meter.nn_ind_receive_end;
+}
+
+function meterAccessible(meter: MosenergosbytMeter): { ok: boolean; reason?: string } {
+  if (meter.pr_state != null && meter.pr_state !== 1) {
+    return { ok: false, reason: `Meter unavailable (pr_state=${meter.pr_state})` };
+  }
+  if (meter.nm_no_access_reason) {
+    return { ok: false, reason: meter.nm_no_access_reason };
+  }
+  return { ok: true };
 }
 
 export function MosenergosbytCard({
@@ -77,7 +95,7 @@ export function MosenergosbytCard({
 
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/login', {
+      const response = await fetch(`${API_BASE}/api/providers/mosenergosbyt/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -96,7 +114,7 @@ export function MosenergosbytCard({
       if (nextStatus.otp_required) {
         const method = nextStatus.selected_kd_tfa ?? 2;
         setSelectedKdTfa(method);
-        const otpResponse = await fetch('/api/providers/mosenergosbyt/otp/send', {
+        const otpResponse = await fetch(`${API_BASE}/api/providers/mosenergosbyt/otp/send`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ kd_tfa: method }),
@@ -123,7 +141,7 @@ export function MosenergosbytCard({
   const handleSendOtp = async (kdTfa: number) => {
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/otp/send', {
+      const response = await fetch(`${API_BASE}/api/providers/mosenergosbyt/otp/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kd_tfa: kdTfa }),
@@ -151,7 +169,7 @@ export function MosenergosbytCard({
     }
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/otp/verify', {
+      const response = await fetch(`${API_BASE}/api/providers/mosenergosbyt/otp/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -182,7 +200,7 @@ export function MosenergosbytCard({
   const handleDisconnect = async () => {
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/providers/mosenergosbyt/disconnect', {
+      const response = await fetch(`${API_BASE}/api/providers/mosenergosbyt/disconnect`, {
         method: 'POST',
       });
       if (!response.ok) {
@@ -339,6 +357,10 @@ export function MosenergosbytCard({
             <div className="space-y-3">
               {meters.map((meter, index) => {
                 const meterLabel = meter.meter_type ? METER_TYPE_LABELS[meter.meter_type] : 'Unknown meter';
+                const access = meterAccessible(meter);
+                const inPeriod = inReceivePeriod(meter);
+                const displayValue = meter.vl_last_indication ?? meter.vl_indication ?? null;
+                const displayDate = meter.dt_last_indication ?? meter.dt_indication ?? null;
                 return (
                   <div key={`${meter.id_counter ?? 'meter'}-${index}`} className="border border-border rounded-[10px] p-4">
                     <p className="text-sm text-muted-foreground">Meter label</p>
@@ -348,10 +370,32 @@ export function MosenergosbytCard({
                     <p>{meter.nm_counter ?? 'n/a'}</p>
 
                     <p className="text-sm text-muted-foreground mt-3">vl_last_indication</p>
-                    <p>{meter.vl_last_indication ?? 'n/a'}</p>
+                    <p>{displayValue ?? 'n/a'}</p>
 
                     <p className="text-sm text-muted-foreground mt-3">dt_last_indication</p>
-                    <p>{formatLastReadingDate(meter.dt_last_indication)}</p>
+                    <p>{formatLastReadingDate(displayDate)}</p>
+
+                    <p className="text-sm text-muted-foreground mt-3">Service</p>
+                    <p>
+                      {meter.nm_service ?? 'n/a'}
+                      {meter.nm_measure_unit ? ` · ${meter.nm_measure_unit}` : ''}
+                    </p>
+
+                    <p className="text-sm text-muted-foreground mt-3">Receive window</p>
+                    <p>
+                      {meter.nn_ind_receive_start != null && meter.nn_ind_receive_end != null
+                        ? `${meter.nn_ind_receive_start}–${meter.nn_ind_receive_end} day`
+                        : 'n/a'}
+                    </p>
+
+                    {!access.ok && (
+                      <p className="text-sm text-destructive mt-3">
+                        Access: {access.reason ?? 'Not available'}
+                      </p>
+                    )}
+                    {access.ok && !inPeriod && (
+                      <p className="text-sm text-destructive mt-3">Submit is closed for the current date</p>
+                    )}
                   </div>
                 );
               })}

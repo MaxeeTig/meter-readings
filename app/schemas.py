@@ -105,12 +105,35 @@ class MosenergosbytVerifyOtpRequest(BaseModel):
 class MosenergosbytMeterRecord(BaseModel):
     meter_type: MeterType | None = None
     nm_counter: str | None = None
+    nm_service: str | None = None
+    nm_measure_unit: str | None = None
     vl_last_indication: float | None = None
+    vl_indication: float | None = None
     dt_last_indication: str | None = None
+    dt_indication: str | None = None
+    nn_ind_receive_start: int | None = None
+    nn_ind_receive_end: int | None = None
+    pr_state: int | None = None
+    nm_no_access_reason: str | None = None
     id_abonent: int | str | None = None
     id_counter: int | str | None = None
+    id_counter_zn: int | str | None = None
     id_service: int | str | None = None
 
 
 class MosenergosbytMetersResponse(BaseModel):
     meters: list[MosenergosbytMeterRecord]
+
+
+class MosenergosbytSubmitRequest(BaseModel):
+    id_abonent: int | str
+    id_service: int | str
+    id_counter: int | str
+    id_counter_zn: int | str | None = None
+    value: float
+
+
+class MosenergosbytSubmitResponse(BaseModel):
+    success: bool
+    message: str
+    portal_code: int | None = None

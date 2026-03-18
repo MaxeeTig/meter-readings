@@ -130,3 +130,98 @@ def test_mosenergosbyt_meters_maps_russian_service_names(tmp_path: Path) -> None
     assert len(meters) == 2
     assert meters[0]["meter_type"] == "hot_water"
     assert meters[1]["meter_type"] == "cold_water"
+
+
+def test_mosenergosbyt_submit_requires_auth(tmp_path: Path) -> None:
+    main.mosenergosbyt_state_store = MosenergosbytStateStore(str(tmp_path / "mosenergosbyt_state.json"))
+    client = TestClient(main.app)
+
+    response = client.post(
+        "/api/providers/mosenergosbyt/submit",
+        json={
+            "id_abonent": 1,
+            "id_service": 2,
+            "id_counter": 3,
+            "value": 100,
+        },
+    )
+    assert response.status_code == 401
+
+
+def test_mosenergosbyt_submit_rejects_decimals_when_not_allowed(tmp_path: Path) -> None:
+    class FakeMosenergosbytClient:
+        async def list_meters(self, *, session: str) -> list[dict]:
+            return [
+                {
+                    "id_abonent": 1,
+                    "id_service": 2,
+                    "id_counter": 3,
+                    "id_counter_zn": 1,
+                    "pr_state": 1,
+                    "nn_ind_receive_start": 1,
+                    "nn_ind_receive_end": 31,
+                }
+            ]
+
+        async def indication_is_float(self, *, session: str, id_service: int | str) -> bool:
+            return False
+
+        async def submit_indication(self, **kwargs):
+            raise AssertionError("submit_indication should not be called")
+
+    main.mosenergosbyt_state_store = MosenergosbytStateStore(str(tmp_path / "mosenergosbyt_state.json"))
+    main.mosenergosbyt_state_store.save(MosenergosbytState(session="SESSION"))
+    main.mosenergosbyt_client = FakeMosenergosbytClient()
+
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/providers/mosenergosbyt/submit",
+        json={
+            "id_abonent": 1,
+            "id_service": 2,
+            "id_counter": 3,
+            "value": 100.5,
+        },
+    )
+    assert response.status_code == 400
+
+
+def test_mosenergosbyt_submit_success(tmp_path: Path) -> None:
+    class FakeMosenergosbytClient:
+        async def list_meters(self, *, session: str) -> list[dict]:
+            return [
+                {
+                    "id_abonent": 1,
+                    "id_service": 2,
+                    "id_counter": 3,
+                    "id_counter_zn": 1,
+                    "pr_state": 1,
+                    "nn_ind_receive_start": 1,
+                    "nn_ind_receive_end": 31,
+                }
+            ]
+
+        async def indication_is_float(self, *, session: str, id_service: int | str) -> bool:
+            return True
+
+        async def submit_indication(self, **kwargs):
+            return True, "Показания успешно переданы", 1000
+
+    main.mosenergosbyt_state_store = MosenergosbytStateStore(str(tmp_path / "mosenergosbyt_state.json"))
+    main.mosenergosbyt_state_store.save(MosenergosbytState(session="SESSION"))
+    main.mosenergosbyt_client = FakeMosenergosbytClient()
+
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/providers/mosenergosbyt/submit",
+        json={
+            "id_abonent": 1,
+            "id_service": 2,
+            "id_counter": 3,
+            "value": 100,
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["message"] == "Показания успешно переданы"

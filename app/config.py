@@ -18,6 +18,7 @@ class Settings:
     mosenergosbyt_base_url: str
     mosenergosbyt_state_file: str
     mosenergosbyt_default_kd_tfa: int
+    mosenergosbyt_id_source: int
 
 
     @staticmethod
@@ -39,4 +40,5 @@ class Settings:
                 "./data/mosenergosbyt_state.json",
             ).strip(),
             mosenergosbyt_default_kd_tfa=int(os.getenv("MOSENERGOSBYT_DEFAULT_KD_TFA", "2")),
+            mosenergosbyt_id_source=int(os.getenv("MOSENERGOSBYT_ID_SOURCE", "15418")),
         )

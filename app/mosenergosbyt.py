@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -241,6 +241,61 @@ class MosenergosbytClient:
                 meters.append(merged)
 
         return meters
+
+    async def indication_is_float(self, *, session: str, id_service: int | str) -> bool:
+        payload = {"id_service": str(id_service)}
+        data = await self._post(
+            f"gate_lkcomu?action=sql&query=IndicationIsFloat&session={session}",
+            payload,
+            referer=f"/accounts/{id_service}/transfer-indications",
+        )
+        rows = data.get("data")
+        if not isinstance(rows, list) or not rows:
+            return True
+        row = rows[0] if isinstance(rows[0], dict) else {}
+        pr_float = row.get("pr_float")
+        return bool(pr_float)
+
+    async def submit_indication(
+        self,
+        *,
+        session: str,
+        id_abonent: int | str,
+        id_service: int | str,
+        id_counter: int | str,
+        id_counter_zn: int | str,
+        id_source: int,
+        value: float,
+    ) -> tuple[bool, str, int | None]:
+        now = datetime.now(timezone(timedelta(hours=3)))
+        dt = now.strftime("%Y-%m-%dT%H:%M:%S") + now.strftime("%z")[:3] + ":" + now.strftime("%z")[3:]
+        payload = {
+            "dt_indication": dt,
+            "id_counter": str(id_counter),
+            "id_counter_zn": str(id_counter_zn),
+            "id_source": str(id_source),
+            "plugin": "propagateMoeInd",
+            "pr_skip_anomaly": "0",
+            "pr_skip_err": "0",
+            "vl_indication": str(value),
+            "vl_provider": json.dumps({"id_abonent": id_abonent}, ensure_ascii=False),
+        }
+        data = await self._post(
+            f"gate_lkcomu?action=sql&query=AbonentSaveIndication&session={session}",
+            payload,
+            referer=f"/accounts/{id_service}/transfer-indications",
+        )
+        if not data.get("success", False):
+            return False, str(data.get("nm_result") or "Unknown error"), None
+        rows = data.get("data")
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            return False, "No data in response", None
+        row = rows[0]
+        kd_result = row.get("kd_result")
+        message = str(row.get("nm_result") or "")
+        if kd_result == 1000:
+            return True, message or "Показания успешно переданы", kd_result
+        return False, message or "Failed to submit", kd_result
 
     async def _post_sql(
         self,
